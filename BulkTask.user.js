@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         VOI Bulk Tasks MUI-Style Fields (v5.1)
+// @name         VOI Bulk Tasks MUI-Style Fields (v5.1 - Synced)
 // @namespace    http://tampermonkey.net/
-// @version      5.1
-// @description  Closer match to Task Type/Priority styling for Description & Internal Note, with full input hover area and same size.
+// @version      5.1.1
+// @description  Closer match to Task Type/Priority styling for Description & Internal Note, with full input hover area and same size. Now also syncs values with hidden inputs so the submit button works.
 // @match        https://fm.voiapp.io/*
 // @run-at       document-idle
 // @grant        none
@@ -11,12 +11,11 @@
 (function() {
     'use strict';
 
-    console.log("[VOI MUI-Style v5.1] Script loaded.");
+    console.log("[VOI MUI-Style v5.1 - Synced] Script loaded.");
 
     ////////////////////////////////////////////////////////////////////////
     // Config: The options for Description + Internal Note
     ////////////////////////////////////////////////////////////////////////
-
     const descriptionOptions = [
         "External Request",
         "Blocked Path/Obstruction",
@@ -74,8 +73,7 @@
         inputBase.style.display = "flex";
         inputBase.style.alignItems = "center";
         inputBase.style.cursor = "pointer"; // entire field is clickable
-        // We match the typical small MUI OutlinedInput height
-        // (You may tweak these if your site has slightly different sizing)
+        // Set the typical small MUI OutlinedInput height
         inputBase.style.minHeight = "40px";
 
         // The actual text input
@@ -84,12 +82,9 @@
         inputEl.type = "text";
         inputEl.placeholder = placeholderText;
         inputEl.style.width = "100%";
-        // Avoid messing up user text selection
         inputEl.style.cursor = "text";
-        // Align text vertically
         inputEl.style.lineHeight = "1.5";
         inputEl.style.border = "none";
-        // We'll let them type if "Other" is chosen
 
         // The arrow icon (like the site’s dropdown icon)
         const arrowImg = document.createElement("img");
@@ -133,17 +128,15 @@
         popupUL.style.borderRadius = "4px";
         popupUL.style.cursor = "pointer";
 
-        // Put everything together
+        // Build the structure
         inputBase.appendChild(inputEl);
         inputBase.appendChild(arrowImg);
         inputBase.appendChild(fieldset);
-
         formControl.appendChild(inputBase);
         autocompleteRoot.appendChild(formControl);
         autocompleteRoot.appendChild(popupUL);
         outerDiv.appendChild(autocompleteRoot);
 
-        // Return references
         return {
             container: outerDiv,
             inputBase,     // The clickable "root"
@@ -198,13 +191,12 @@
             console.log("[VOI MUI-Style] Original desc/note not found.");
             return;
         }
-        // Hide them so they don't conflict visually
+        // Hide the original inputs so they don’t interfere visually
         descOrig.style.display = "none";
         noteOrig.style.display = "none";
 
         // 1) Build the "Description" field container
         const descField = createMuiFieldContainer("Description", "Add description...");
-        // Insert it just before the original container
         descOrig.closest(".css-1k2ndaq")?.insertAdjacentElement("beforebegin", descField.container);
 
         // 2) Build the "Internal note" field container
@@ -213,18 +205,18 @@
 
         // =============== Logic for Description Field ===============
         descField.inputEl.value = lastDescValue || "";
-        // If user clicks anywhere in inputBase, we toggle the dropdown
+        // Clicking the field toggles the dropdown
         descField.inputBase.addEventListener("click", (e) => {
             e.stopPropagation();
             const isHidden = (descField.popupUL.style.display !== "block");
             populateAndToggleUL(descField.popupUL, descriptionOptions, isHidden);
         });
-        // If user clicks outside, close
+        // Close the dropdown on outside click
         document.addEventListener("click", () => {
             descField.popupUL.style.display = "none";
         }, { capture: true });
 
-        // Clicking an option
+        // When an option is clicked
         descField.popupUL.addEventListener("click", (e) => {
             e.stopPropagation();
             if (e.target.tagName === "LI") {
@@ -233,9 +225,13 @@
                     descField.inputEl.value = "";
                     descField.inputEl.focus();
                     lastDescValue = "";
+                    // Sync the hidden input
+                    descOrig.value = "";
                 } else {
                     descField.inputEl.value = chosen;
                     lastDescValue = chosen;
+                    // Sync the hidden input with the selected value
+                    descOrig.value = chosen;
                 }
                 descField.popupUL.style.display = "none";
                 updateNoteField(noteField, lastDescValue);
@@ -243,11 +239,13 @@
             }
         });
 
-        // If user typed for "Other":
+        // Update on blur if the user types manually (for "Other")
         descField.inputEl.addEventListener("blur", () => {
             const typedVal = descField.inputEl.value.trim();
             if (!descriptionOptions.includes(typedVal)) {
                 lastDescValue = typedVal;
+                // Sync hidden description input
+                descOrig.value = typedVal;
                 console.log("[VOI MUI-Style] Description typed manually:", typedVal);
                 updateNoteField(noteField, typedVal);
             }
@@ -255,8 +253,7 @@
 
         // =============== Logic for Internal Note Field ===============
         noteField.inputEl.value = lastNoteValue || "";
-
-        // Clicking in inputBase => toggle note options
+        // Toggle the note options on click
         noteField.inputBase.addEventListener("click", (e) => {
             e.stopPropagation();
             const isHidden = (noteField.popupUL.style.display !== "block");
@@ -267,32 +264,38 @@
             noteField.popupUL.style.display = "none";
         }, { capture: true });
 
+        // When a note option is clicked
         noteField.popupUL.addEventListener("click", (e) => {
             e.stopPropagation();
             if (e.target.tagName === "LI") {
                 const chosen = e.target.textContent;
                 noteField.inputEl.value = chosen;
                 lastNoteValue = chosen;
+                // Sync the hidden note input
+                noteOrig.value = chosen;
                 noteField.popupUL.style.display = "none";
                 console.log("[VOI MUI-Style] Note selected:", lastNoteValue);
             }
         });
 
+        // Update on blur if user types the note manually
         noteField.inputEl.addEventListener("blur", () => {
             const typedVal = noteField.inputEl.value.trim();
             const validOptions = internalOptionsByDesc[lastDescValue] || [];
             if (!validOptions.includes(typedVal)) {
                 lastNoteValue = typedVal;
+                // Sync hidden internal note input
+                noteOrig.value = typedVal;
                 console.log("[VOI MUI-Style] Note typed manually:", typedVal);
             }
         });
 
-        // Initialize the Note field in case we had a stored desc
+        // Initialize the Note field based on the current description
         updateNoteField(noteField, lastDescValue);
     }
 
     ////////////////////////////////////////////////////////////////////////
-    // If the new desc is "Other" or not in the map => no note options
+    // If the new description is "Other" or not in the map => clear note field
     ////////////////////////////////////////////////////////////////////////
     function updateNoteField(noteField, descVal) {
         noteField.inputEl.value = "";
@@ -301,7 +304,7 @@
     }
 
     ////////////////////////////////////////////////////////////////////////
-    // Observers: watch for Bulk Tasks panel
+    // Observers: watch for the Bulk Tasks panel to open/close
     ////////////////////////////////////////////////////////////////////////
     let observerForOpen = null;
     let observerForClose = null;
