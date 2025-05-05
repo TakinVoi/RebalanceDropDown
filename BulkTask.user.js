@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         VOI MUI-Style Tasks Single & Bulk (v5.2.2 - Type-Conditional)
+// @name         VOI MUI-Style Tasks Dropdown (v5.2.3)
 // @namespace    http://tampermonkey.net/
-// @version      5.2.2
-// @description  Only show Description & Internal Note dropdowns when Task Type is Rebalance or Repark.
+// @version      5.2.3
+// @description  Only show Description & Internal Note dropdowns for Rebalance/Repark, and sync selections into React form state.
 // @match        https://fm.voiapp.io/*
 // @run-at       document-idle
 // @grant        none
@@ -11,7 +11,23 @@
 (function() {
     'use strict';
 
-    console.log("[VOI MUI-Style v5.2.2] Script loaded.");
+    console.log("[VOI MUI-Style v5.2.3] Script loaded.");
+
+    // ==== Hilfsfunktion zum Setzen von React-controlled Input-Werten ====
+    function setNativeValue(element, value) {
+        const valueSetter = Object.getOwnPropertyDescriptor(
+            Object.getPrototypeOf(element),
+            'value'
+        )?.set;
+        if (valueSetter) {
+            valueSetter.call(element, value);
+        } else {
+            element.value = value;
+        }
+        // React hört intern auf 'input', nicht auf 'change'
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+    }
 
     const descriptionOptions = [
         "External Request",
@@ -137,9 +153,10 @@
         }
     }
 
-    function resetNoteField(noteField) {
+    function resetNoteField(noteField, noteOrig) {
         noteField.inputEl.value = "";
         lastNoteValue = "";
+        setNativeValue(noteOrig, "");
         noteField.popupUL.style.display = "none";
     }
 
@@ -149,6 +166,7 @@
         const typeInput = panelRoot.querySelector('[data-testid="create-task-form-type-select"] input');
         if (!descOrig || !noteOrig || !typeInput) return;
 
+        // hide original DOM inputs so sie nicht stören
         descOrig.style.display = "none";
         noteOrig.style.display = "none";
 
@@ -158,18 +176,16 @@
         const noteField = createMuiFieldContainer("Internal note", "Add note...");
         noteOrig.closest(".css-1k2ndaq")?.insertAdjacentElement("beforebegin", noteField.container);
 
-        // Description logic: only open when Task Type is Rebalance or Repark
+        // ====== Description logic ======
         descField.inputBase.addEventListener("click", e => {
             e.stopPropagation();
             const t = typeInput.value.trim().toLowerCase();
             if (t === "rebalance" || t === "repark") {
-                descField.inputEl.value = "";
-                lastDescValue = "";
-                descOrig.value = "";
                 populateAndToggleUL(descField.popupUL, descriptionOptions, true);
             }
         });
         document.addEventListener("click", () => descField.popupUL.style.display = "none", { capture: true });
+
         descField.popupUL.addEventListener("click", e => {
             e.stopPropagation();
             if (e.target.tagName === "LI") {
@@ -177,59 +193,59 @@
                 if (v === "Other") {
                     descField.inputEl.value = "";
                     lastDescValue = "";
-                    descOrig.value = "";
+                    setNativeValue(descOrig, "");
                 } else {
                     descField.inputEl.value = v;
                     lastDescValue = v;
-                    descOrig.value = v;
+                    setNativeValue(descOrig, v);
                 }
                 descField.popupUL.style.display = "none";
-                resetNoteField(noteField);
+                resetNoteField(noteField, noteOrig);
             }
         });
+
         descField.inputEl.addEventListener("blur", () => {
             const v = descField.inputEl.value.trim();
             if (!descriptionOptions.includes(v)) {
                 lastDescValue = v;
-                descOrig.value = v;
-                resetNoteField(noteField);
+                setNativeValue(descOrig, v);
+                resetNoteField(noteField, noteOrig);
             }
         });
 
-        // Note logic: only open when Task Type is Rebalance or Repark
+        // ====== Internal note logic ======
         noteField.inputBase.addEventListener("click", e => {
             e.stopPropagation();
             const t = typeInput.value.trim().toLowerCase();
             if (t === "rebalance" || t === "repark") {
-                noteField.inputEl.value = "";
-                lastNoteValue = "";
-                noteOrig.value = "";
                 const opts = internalOptionsByDesc[lastDescValue] || [];
                 populateAndToggleUL(noteField.popupUL, opts, true);
             }
         });
         document.addEventListener("click", () => noteField.popupUL.style.display = "none", { capture: true });
+
         noteField.popupUL.addEventListener("click", e => {
             e.stopPropagation();
             if (e.target.tagName === "LI") {
                 const v = e.target.textContent;
                 noteField.inputEl.value = v;
                 lastNoteValue = v;
-                noteOrig.value = v;
+                setNativeValue(noteOrig, v);
                 noteField.popupUL.style.display = "none";
             }
         });
+
         noteField.inputEl.addEventListener("blur", () => {
             const v = noteField.inputEl.value.trim();
             const valid = internalOptionsByDesc[lastDescValue] || [];
             if (!valid.includes(v)) {
                 lastNoteValue = v;
-                noteOrig.value = v;
+                setNativeValue(noteOrig, v);
             }
         });
     }
 
-    // Bulk observer (unchanged)
+    // ==== Observer für Bulk Tasks ====
     let observerForOpen = null, observerForClose = null;
     function startWatchingForBulk() {
         if (observerForOpen) observerForOpen.disconnect();
@@ -237,9 +253,9 @@
             for (const mut of muts) {
                 for (const node of mut.addedNodes) {
                     if (node.nodeType !== 1) continue;
-                    const bulkHeader = node.querySelector('.css-1alqfzv h3.css-wnk731');
-                    if (bulkHeader && /bulk tasks/i.test(bulkHeader.textContent)) {
-                        console.log("[VOI MUI-Style] Bulk tasks panel found.");
+                    const hdr = node.querySelector('.css-1alqfzv h3.css-wnk731');
+                    if (hdr && /bulk tasks/i.test(hdr.textContent)) {
+                        console.log("[VOI MUI-Style] Bulk panel gefunden.");
                         createCustomFields(node);
                         observerForOpen.disconnect();
                         observerForOpen = null;
@@ -261,7 +277,7 @@
     }
     startWatchingForBulk();
 
-    // Single-scooter Add task observer
+    // ==== Observer für Single 'Add task' Popup ====
     function startWatchingForAddTask() {
         const obs = new MutationObserver(muts => {
             for (const mut of muts) {
@@ -269,7 +285,7 @@
                     if (node.nodeType !== 1) continue;
                     const hdr = node.querySelector('h3.css-wnk731');
                     if (hdr && hdr.textContent.trim() === "Add task") {
-                        console.log("[VOI MUI-Style] Add-task popup found.");
+                        console.log("[VOI MUI-Style] Add-task Popup gefunden.");
                         createCustomFields(node);
                     }
                 }
